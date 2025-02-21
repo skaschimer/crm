@@ -3,43 +3,6 @@
     v-if="isMobileView"
     class="flex flex-col justify-between gap-2 sm:px-5 px-3 py-4"
   >
-    <div class="flex items-center justify-between gap-2 overflow-x-auto">
-      <div class="flex gap-2">
-        <Dropdown :options="viewsDropdownOptions">
-          <template #default="{ open }">
-            <Button :label="__(currentView.label)">
-              <template #prefix>
-                <div v-if="isEmoji(currentView.icon)">
-                  {{ currentView.icon }}
-                </div>
-                <FeatherIcon
-                  v-else-if="typeof currentView.icon == 'string'"
-                  :name="currentView.icon"
-                  class="h-4"
-                />
-                <component v-else :is="currentView.icon" class="h-4" />
-              </template>
-              <template #suffix>
-                <FeatherIcon
-                  :name="open ? 'chevron-up' : 'chevron-down'"
-                  class="h-4 text-gray-600"
-                />
-              </template>
-            </Button>
-          </template>
-        </Dropdown>
-        <Dropdown :options="viewActions">
-          <template #default>
-            <Button icon="more-horizontal" />
-          </template>
-        </Dropdown>
-      </div>
-      <Button :label="__('Refresh')" @click="reload()" :loading="isLoading">
-        <template #icon>
-          <RefreshIcon class="h-4 w-4" />
-        </template>
-      </Button>
-    </div>
     <div class="flex flex-col gap-2">
       <div class="flex items-center justify-between gap-2 overflow-x-auto">
         <div class="flex gap-2">
@@ -59,6 +22,11 @@
         </div>
 
         <div class="flex gap-2">
+          <Button :label="__('Refresh')" @click="reload()" :loading="isLoading">
+            <template #icon>
+              <RefreshIcon class="h-4 w-4" />
+            </template>
+          </Button>
           <SortBy
             v-if="route.params.viewType !== 'kanban'"
             v-model="list"
@@ -91,42 +59,13 @@
     </div>
   </div>
   <div v-else class="flex items-center justify-between gap-2 px-5 py-4">
-    <div class="flex items-center gap-2">
-      <Dropdown :options="viewsDropdownOptions">
-        <template #default="{ open }">
-          <Button :label="__(currentView.label)">
-            <template #prefix>
-              <div v-if="isEmoji(currentView.icon)">{{ currentView.icon }}</div>
-              <FeatherIcon
-                v-else-if="typeof currentView.icon == 'string'"
-                :name="currentView.icon"
-                class="h-4"
-              />
-              <component v-else :is="currentView.icon" class="h-4" />
-            </template>
-            <template #suffix>
-              <FeatherIcon
-                :name="open ? 'chevron-up' : 'chevron-down'"
-                class="h-4 text-gray-600"
-              />
-            </template>
-          </Button>
-        </template>
-      </Dropdown>
-      <Dropdown :options="viewActions">
-        <template #default>
-          <Button icon="more-horizontal" />
-        </template>
-      </Dropdown>
-    </div>
-    <div class="-mr-2 h-[70%] border-l" />
     <FadedScrollableDiv
-      class="flex flex-1 items-center overflow-x-auto px-1"
+      class="flex flex-1 items-center overflow-x-auto -ml-1"
       orientation="horizontal"
     >
       <div
         v-for="filter in quickFilterList"
-        :key="filter.name"
+        :key="filter.fieldname"
         class="m-1 min-w-36"
       >
         <QuickFilterField
@@ -223,6 +162,7 @@
       afterUpdate: () => {
         viewUpdated = false
         reloadView()
+        list.reload()
       },
     }"
   />
@@ -268,12 +208,14 @@
   </Dialog>
 </template>
 <script setup>
-import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
+import ListIcon from '@/components/Icons/ListIcon.vue'
 import KanbanIcon from '@/components/Icons/KanbanIcon.vue'
+import GroupByIcon from '@/components/Icons/GroupByIcon.vue'
 import QuickFilterField from '@/components/QuickFilterField.vue'
 import RefreshIcon from '@/components/Icons/RefreshIcon.vue'
 import EditIcon from '@/components/Icons/EditIcon.vue'
 import DuplicateIcon from '@/components/Icons/DuplicateIcon.vue'
+import CheckIcon from '@/components/Icons/CheckIcon.vue'
 import PinIcon from '@/components/Icons/PinIcon.vue'
 import UnpinIcon from '@/components/Icons/UnpinIcon.vue'
 import ViewModal from '@/components/Modals/ViewModal.vue'
@@ -283,11 +225,18 @@ import GroupBy from '@/components/GroupBy.vue'
 import FadedScrollableDiv from '@/components/FadedScrollableDiv.vue'
 import ColumnSettings from '@/components/ColumnSettings.vue'
 import KanbanSettings from '@/components/Kanban/KanbanSettings.vue'
+import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
 import { viewsStore } from '@/stores/views'
 import { usersStore } from '@/stores/users'
 import { isEmoji } from '@/utils'
-import { createResource, Dropdown, call, FeatherIcon } from 'frappe-ui'
+import {
+  createResource,
+  Dropdown,
+  call,
+  FeatherIcon,
+  usePageMeta,
+} from 'frappe-ui'
 import { computed, ref, onMounted, watch, h, markRaw } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
@@ -313,8 +262,9 @@ const props = defineProps({
   },
 })
 
+const { brand } = getSettings()
 const { $dialog } = globalStore()
-const { reload: reloadView, getView } = viewsStore()
+const { reload: reloadView, getDefaultView, getView } = viewsStore()
 const { isManager } = usersStore()
 
 const list = defineModel()
@@ -334,15 +284,18 @@ function getViewType() {
   let viewType = route.params.viewType || 'list'
   let types = {
     list: {
-      label: __('List View'),
-      icon: 'list',
+      name: 'list',
+      label: __('List'),
+      icon: markRaw(ListIcon),
     },
     group_by: {
-      label: __('Group By View'),
-      icon: markRaw(DetailsIcon),
+      name: 'group_by',
+      label: __('Group By'),
+      icon: markRaw(GroupByIcon),
     },
     kanban: {
-      label: __('Kanban View'),
+      name: 'kanban',
+      label: __('Kanban'),
       icon: markRaw(KanbanIcon),
     },
   }
@@ -353,9 +306,24 @@ function getViewType() {
 const currentView = computed(() => {
   let _view = getView(route.query.view, route.params.viewType, props.doctype)
   return {
+    name: _view?.name || getViewType().name,
     label:
       _view?.label || props.options?.defaultViewName || getViewType().label,
     icon: _view?.icon || getViewType().icon,
+    is_standard: !_view || _view.is_standard,
+  }
+})
+
+usePageMeta(() => {
+  let label = currentView.value.label
+  if (currentView.value.is_standard) {
+    let routeName = route.name
+    label = `${routeName} - ${label}`
+  }
+  return {
+    title: label,
+    emoji: isEmoji(currentView.value.icon) ? currentView.value.icon : '',
+    icon: brand.favicon,
   }
 })
 
@@ -494,7 +462,12 @@ const export_all = ref(false)
 
 async function exportRows() {
   let fields = JSON.stringify(list.value.data.columns.map((f) => f.key))
-  let filters = JSON.stringify(list.value.params.filters)
+
+  let filters = JSON.stringify({
+    ...props.filters,
+    ...list.value.params.filters,
+  })
+
   let order_by = list.value.params.order_by
   let page_length = list.value.params.page_length
   if (export_all.value) {
@@ -507,36 +480,39 @@ async function exportRows() {
   export_type.value = 'Excel'
 }
 
-let defaultViews = []
+let standardViews = []
 let allowedViews = props.options.allowedViews || ['list']
 
 if (allowedViews.includes('list')) {
-  defaultViews.push({
-    label: __(props.options?.defaultViewName) || __('List View'),
-    icon: 'list',
+  standardViews.push({
+    name: 'list',
+    label: __(props.options?.defaultViewName) || __('List'),
+    icon: markRaw(ListIcon),
     onClick() {
       viewUpdated.value = false
       router.push({ name: route.name })
     },
   })
 }
-if (allowedViews.includes('group_by')) {
-  defaultViews.push({
-    label: __(props.options?.defaultViewName) || __('Group By View'),
-    icon: markRaw(DetailsIcon),
-    onClick() {
-      viewUpdated.value = false
-      router.push({ name: route.name, params: { viewType: 'group_by' } })
-    },
-  })
-}
 if (allowedViews.includes('kanban')) {
-  defaultViews.push({
-    label: __(props.options?.defaultViewName) || __('Kanban View'),
+  standardViews.push({
+    name: 'kanban',
+    label: __(props.options?.defaultViewName) || __('Kanban'),
     icon: markRaw(KanbanIcon),
     onClick() {
       viewUpdated.value = false
       router.push({ name: route.name, params: { viewType: 'kanban' } })
+    },
+  })
+}
+if (allowedViews.includes('group_by')) {
+  standardViews.push({
+    name: 'group_by',
+    label: __(props.options?.defaultViewName) || __('Group By'),
+    icon: markRaw(GroupByIcon),
+    onClick() {
+      viewUpdated.value = false
+      router.push({ name: route.name, params: { viewType: 'group_by' } })
     },
   })
 }
@@ -545,22 +521,25 @@ function getIcon(icon, type) {
   if (isEmoji(icon)) {
     return h('div', icon)
   } else if (!icon && type === 'group_by') {
-    return markRaw(DetailsIcon)
+    return markRaw(GroupByIcon)
+  } else if (!icon && type === 'kanban') {
+    return markRaw(KanbanIcon)
   }
-  return icon || 'list'
+  return icon || markRaw(ListIcon)
 }
 
 const viewsDropdownOptions = computed(() => {
   let _views = [
     {
-      group: __('Default Views'),
+      group: __('Standard Views'),
       hideLabel: true,
-      items: defaultViews,
+      items: standardViews,
     },
   ]
 
   if (list.value?.data?.views) {
     list.value.data.views.forEach((view) => {
+      view.name = view.name
       view.label = __(view.label)
       view.type = view.type || 'list'
       view.icon = getIcon(view.icon, view.type)
@@ -579,20 +558,19 @@ const viewsDropdownOptions = computed(() => {
     })
     let publicViews = list.value.data.views.filter((v) => v.public)
     let savedViews = list.value.data.views.filter(
-      (v) => !v.pinned && !v.public && !v.is_default,
+      (v) => !v.pinned && !v.public && !v.is_standard,
     )
     let pinnedViews = list.value.data.views.filter((v) => v.pinned)
-
-    publicViews.length &&
-      _views.push({
-        group: __('Public Views'),
-        items: publicViews,
-      })
 
     savedViews.length &&
       _views.push({
         group: __('Saved Views'),
         items: savedViews,
+      })
+    publicViews.length &&
+      _views.push({
+        group: __('Public Views'),
+        items: publicViews,
       })
     pinnedViews.length &&
       _views.push({
@@ -601,31 +579,45 @@ const viewsDropdownOptions = computed(() => {
       })
   }
 
+  _views.push({
+    group: __('Actions'),
+    hideLabel: true,
+    items: [
+      {
+        label: __('Create View'),
+        icon: 'plus',
+        onClick: () => createView(),
+      },
+    ],
+  })
+
   return _views
 })
 
 const quickFilterList = computed(() => {
-  let filters = [{ name: 'name', label: __('ID') }]
+  let filters = [{ fieldname: 'name', fieldtype: 'Data', label: __('ID') }]
   if (quickFilters.data) {
     filters.push(...quickFilters.data)
   }
 
   filters.forEach((filter) => {
-    filter['value'] = filter.type == 'Check' ? false : ''
-    if (list.value.params?.filters[filter.name]) {
-      let value = list.value.params.filters[filter.name]
+    filter['value'] = filter.fieldtype == 'Check' ? false : ''
+    if (list.value.params?.filters[filter.fieldname]) {
+      let value = list.value.params.filters[filter.fieldname]
       if (Array.isArray(value)) {
         if (
           (['Check', 'Select', 'Link', 'Date', 'Datetime'].includes(
-            filter.type,
+            filter.fieldtype,
           ) &&
             value[0]?.toLowerCase() == 'like') ||
           value[0]?.toLowerCase() != 'like'
         )
           return
         filter['value'] = value[1]?.replace(/%/g, '')
+      } else if (typeof value == 'boolean') {
+        filter['value'] = value
       } else {
-        filter['value'] = value.replace(/%/g, '')
+        filter['value'] = value?.replace(/%/g, '')
       }
     }
   })
@@ -642,9 +634,11 @@ const quickFilters = createResource({
 
 function applyQuickFilter(filter, value) {
   let filters = { ...list.value.params.filters }
-  let field = filter.name
+  let field = filter.fieldname
   if (value) {
-    if (['Check', 'Select', 'Link', 'Date', 'Datetime'].includes(filter.type)) {
+    if (
+      ['Check', 'Select', 'Link', 'Date', 'Datetime'].includes(filter.fieldtype)
+    ) {
       filters[field] = value
     } else {
       filters[field] = ['LIKE', `%${value}%`]
@@ -668,7 +662,7 @@ function updateFilter(filters) {
   list.value.reload()
 
   if (!route.query.view) {
-    create_or_update_default_view()
+    createOrUpdateStandardView()
   }
 }
 
@@ -683,7 +677,7 @@ function updateSort(order_by) {
   list.value.reload()
 
   if (!route.query.view) {
-    create_or_update_default_view()
+    createOrUpdateStandardView()
   }
 }
 
@@ -698,7 +692,7 @@ function updateGroupBy(group_by_field) {
   list.value.reload()
 
   if (!route.query.view) {
-    create_or_update_default_view()
+    createOrUpdateStandardView()
   }
 }
 
@@ -732,7 +726,7 @@ function updateColumns(obj) {
   viewUpdated.value = true
 
   if (!route.query.view) {
-    create_or_update_default_view()
+    createOrUpdateStandardView()
   }
 }
 
@@ -774,7 +768,7 @@ async function updateKanbanSettings(data) {
   list.value.reload()
 
   if (!route.query.view) {
-    create_or_update_default_view()
+    createOrUpdateStandardView()
   } else if (!data.column_field) {
     if (isDirty) {
       $dialog({
@@ -786,20 +780,20 @@ async function updateKanbanSettings(data) {
             label: __('Update'),
             variant: 'solid',
             onClick: (close) => {
-              update_custom_view()
+              updateCustomView()
               close()
             },
           },
         ],
       })
     } else {
-      update_custom_view()
+      updateCustomView()
     }
   }
 }
 
 function loadMoreKanban(columnName) {
-  let columns = list.value.data.kanban_columns || "[]"
+  let columns = list.value.data.kanban_columns || '[]'
 
   if (typeof columns === 'string') {
     columns = JSON.parse(columns)
@@ -817,11 +811,11 @@ function loadMoreKanban(columnName) {
   list.value.reload()
 }
 
-function create_or_update_default_view() {
+function createOrUpdateStandardView() {
   if (route.query.view) return
   view.value.doctype = props.doctype
   call(
-    'crm.fcrm.doctype.crm_view_settings.crm_view_settings.create_or_update_default_view',
+    'crm.fcrm.doctype.crm_view_settings.crm_view_settings.create_or_update_standard_view',
     {
       view: view.value,
     },
@@ -848,7 +842,7 @@ function create_or_update_default_view() {
   })
 }
 
-function update_custom_view() {
+function updateCustomView() {
   viewUpdated.value = false
   view.value = {
     doctype: props.doctype,
@@ -893,46 +887,68 @@ function updatePageLength(value, loadMore = false) {
 }
 
 // View Actions
-const viewActions = computed(() => {
+const viewActions = (view) => {
+  let isStandard = typeof view.name === 'string'
+  let _view = getView(view.name)
+
+  if (isStandard) {
+    _view = getView(null, view.name, props.doctype)
+  }
+
+  if (!_view) {
+    _view = {
+      label: view.label,
+      type: view.name,
+      dt: props.doctype,
+    }
+  }
+
   let actions = [
     {
-      group: __('Default Views'),
+      group: __('Actions'),
       hideLabel: true,
       items: [
         {
           label: __('Duplicate'),
           icon: () => h(DuplicateIcon, { class: 'h-4 w-4' }),
-          onClick: () => duplicateView(),
+          onClick: () => duplicateView(_view),
         },
       ],
     },
   ]
 
-  if (route.query.view && (!view.value.public || isManager())) {
+  if (!isDefaultView(_view, isStandard)) {
+    actions[0].items.unshift({
+      label: __('Set as default'),
+      icon: () => h(CheckIcon, { class: 'h-4 w-4' }),
+      onClick: () => setAsDefault(_view),
+    })
+  }
+
+  if (!isStandard && (!_view.public || isManager())) {
     actions[0].items.push({
       label: __('Edit'),
       icon: () => h(EditIcon, { class: 'h-4 w-4' }),
-      onClick: () => editView(),
+      onClick: () => editView(_view),
     })
 
-    if (!view.value.public) {
+    if (!_view.public) {
       actions[0].items.push({
-        label: view.value.pinned ? __('Unpin View') : __('Pin View'),
-        icon: () =>
-          h(view.value.pinned ? UnpinIcon : PinIcon, { class: 'h-4 w-4' }),
-        onClick: () => pinView(),
+        label: _view.pinned ? __('Unpin View') : __('Pin View'),
+        icon: () => h(_view.pinned ? UnpinIcon : PinIcon, { class: 'h-4 w-4' }),
+        onClick: () => pinView(_view),
       })
     }
 
     if (isManager()) {
       actions[0].items.push({
-        label: view.value.public ? __('Make Private') : __('Make Public'),
+        label: _view.public ? __('Make Private') : __('Make Public'),
         icon: () =>
           h(FeatherIcon, {
-            name: view.value.public ? 'lock' : 'unlock',
+            name: _view.public ? 'lock' : 'unlock',
             class: 'h-4 w-4',
           }),
-        onClick: () => publicView(),
+        onClick: () => publicView(_view),
       })
     }
 
@@ -946,14 +962,16 @@ const viewActions = computed(() => {
           onClick: () =>
             $dialog({
               title: __('Delete View'),
-              message: __('Are you sure you want to delete this view?'),
+              message: __('Are you sure you want to delete "{0}" view?', [
+                _view.label,
+              ]),
               variant: 'danger',
               actions: [
                 {
                   label: __('Delete'),
                   variant: 'solid',
                   theme: 'red',
-                  onClick: (close) => deleteView(close),
+                  onClick: (close) => deleteView(_view, close),
                 },
               ],
             }),
@@ -962,56 +980,80 @@ const viewActions = computed(() => {
     })
   }
   return actions
-})
+}
+
+function isDefaultView(v, isStandard) {
+  let defaultView = getDefaultView()
+
+  if (!defaultView || (isStandard && !v.name)) return false
+
+  return defaultView.name == v.name
+}
 
 const viewModalObj = ref({})
 
-function duplicateView() {
-  let label =
-    __(
-      getView(route.query.view, route.params.viewType, props.doctype)?.label,
-    ) || getViewType().label
+function createView() {
   view.value.name = ''
-  view.value.label = label + __(' (New)')
+  view.value.label = ''
+  view.value.icon = ''
   viewModalObj.value = view.value
+  viewModalObj.value.mode = 'create'
   showViewModal.value = true
 }
 
-function editView() {
-  let cView = getView(route.query.view, route.params.viewType, props.doctype)
-  view.value.name = route.query.view
-  view.value.label = __(cView?.label) || getViewType().label
-  view.value.icon = cView?.icon || ''
-  viewModalObj.value = view.value
+function setAsDefault(v) {
+  call('crm.fcrm.doctype.crm_view_settings.crm_view_settings.set_as_default', {
+    name: v.name,
+    type: v.type,
+    doctype: v.dt,
+  }).then(() => {
+    reloadView()
+    list.value.reload()
+  })
+}
+
+function duplicateView(v) {
+  v.label = v.label + __(' (New)')
+  viewModalObj.value = v
+  viewModalObj.value.mode = 'duplicate'
   showViewModal.value = true
 }
 
-function publicView() {
+function editView(v) {
+  viewModalObj.value = v
+  viewModalObj.value.mode = 'edit'
+  showViewModal.value = true
+}
+
+function publicView(v) {
   call('crm.fcrm.doctype.crm_view_settings.crm_view_settings.public', {
-    name: route.query.view,
-    value: !view.value.public,
+    name: v.name,
+    value: !v.public,
   }).then(() => {
-    view.value.public = !view.value.public
+    v.public = !v.public
     reloadView()
+    list.value.reload()
   })
 }
 
-function pinView() {
+function pinView(v) {
   call('crm.fcrm.doctype.crm_view_settings.crm_view_settings.pin', {
-    name: route.query.view,
-    value: !view.value.pinned,
+    name: v.name,
+    value: !v.pinned,
   }).then(() => {
-    view.value.pinned = !view.value.pinned
+    v.pinned = !v.pinned
     reloadView()
+    list.value.reload()
   })
 }
 
-function deleteView(close) {
+function deleteView(v, close) {
   call('crm.fcrm.doctype.crm_view_settings.crm_view_settings.delete', {
-    name: route.query.view,
+    name: v.name,
   }).then(() => {
     router.push({ name: route.name })
     reloadView()
+    list.value.reload()
   })
   close()
 }
@@ -1040,6 +1082,7 @@ function saveView() {
     load_default_columns: view.value.load_default_columns,
   }
   viewModalObj.value = view.value
+  viewModalObj.value.mode = 'edit'
   showViewModal.value = true
 }
 
@@ -1100,6 +1143,9 @@ defineExpose({
   likeDoc,
   updateKanbanSettings,
   loadMoreKanban,
+  viewActions,
+  viewsDropdownOptions,
+  currentView,
 })
 
 // Watchers

@@ -1,27 +1,29 @@
 <template>
   <LayoutHeader v-if="lead.data">
     <template #left-header>
-      <Breadcrumbs :items="breadcrumbs" />
+      <Breadcrumbs :items="breadcrumbs">
+        <template #prefix="{ item }">
+          <Icon v-if="item.icon" :icon="item.icon" class="mr-2 h-4" />
+        </template>
+      </Breadcrumbs>
     </template>
     <template #right-header>
       <CustomActions
-        v-if="lead.data._customActions"
+        v-if="lead.data._customActions?.length"
         :actions="lead.data._customActions"
       />
-      <component :is="lead.data._assignedTo?.length == 1 ? 'Button' : 'div'">
-        <MultipleAvatar
-          :avatars="lead.data._assignedTo"
-          @click="showAssignmentModal = true"
-        />
-      </component>
-      <Dropdown :options="statusOptions('lead', updateField)">
+      <AssignTo
+        v-model="lead.data._assignedTo"
+        :data="lead.data"
+        doctype="CRM Lead"
+      />
+      <Dropdown
+        :options="statusOptions('lead', updateField, lead.data._customStatuses)"
+      >
         <template #default="{ open }">
-          <Button
-            :label="lead.data.status"
-            :class="getLeadStatus(lead.data.status).colorClass"
-          >
+          <Button :label="lead.data.status">
             <template #prefix>
-              <IndicatorIcon />
+              <IndicatorIcon :class="getLeadStatus(lead.data.status).color" />
             </template>
             <template #suffix>
               <FeatherIcon
@@ -40,20 +42,21 @@
     </template>
   </LayoutHeader>
   <div v-if="lead?.data" class="flex h-full overflow-hidden">
-    <Tabs v-model="tabIndex" v-slot="{ tab }" :tabs="tabs">
-      <Activities
-        ref="activities"
-        doctype="CRM Lead"
-        :title="tab.name"
-        :tabs="tabs"
-        v-model:reload="reload"
-        v-model:tabIndex="tabIndex"
-        v-model="lead"
-      />
+    <Tabs as="div" v-model="tabIndex" :tabs="tabs">
+      <template #tab-panel>
+        <Activities
+          ref="activities"
+          doctype="CRM Lead"
+          :tabs="tabs"
+          v-model:reload="reload"
+          v-model:tabIndex="tabIndex"
+          v-model="lead"
+        />
+      </template>
     </Tabs>
     <Resizer class="flex flex-col justify-between border-l" side="right">
       <div
-        class="flex h-10.5 cursor-copy items-center border-b px-5 py-2.5 text-lg font-medium"
+        class="flex h-10.5 cursor-copy items-center border-b px-5 py-2.5 text-lg font-medium text-ink-gray-9"
         @click="copyToClipboard(lead.data.name)"
       >
         {{ __(lead.data.name) }}
@@ -108,7 +111,7 @@
             </div>
             <div class="flex flex-col gap-2.5 truncate">
               <Tooltip :text="lead.data.lead_name || __('Set first name')">
-                <div class="truncate text-2xl font-medium">
+                <div class="truncate text-2xl font-medium text-ink-gray-9">
                   {{ lead.data.lead_name || __('Untitled') }}
                 </div>
               </Tooltip>
@@ -150,6 +153,11 @@
                     />
                   </Button>
                 </Tooltip>
+                <Tooltip :text="__('Attach a file')">
+                  <Button class="h-7 w-7" @click="showFilesUploader = true">
+                    <AttachmentIcon class="h-4 w-4" />
+                  </Button>
+                </Tooltip>
               </div>
               <ErrorMessage :message="__(error)" />
             </div>
@@ -162,48 +170,22 @@
         @updateField="updateField"
       />
       <div
-        v-if="fieldsLayout.data"
+        v-if="sections.data"
         class="flex flex-1 flex-col justify-between overflow-hidden"
       >
-        <div class="flex flex-col overflow-y-auto">
-          <div
-            v-for="(section, i) in fieldsLayout.data"
-            :key="section.label"
-            class="flex flex-col p-3"
-            :class="{ 'border-b': i !== fieldsLayout.data.length - 1 }"
-          >
-            <Section :is-opened="section.opened" :label="section.label">
-              <SectionFields
-                :fields="section.fields"
-                v-model="lead.data"
-                @update="updateField"
-              />
-              <template v-if="i == 0 && isManager()" #actions>
-                <Button
-                  variant="ghost"
-                  class="w-7 mr-2"
-                  @click="showSidePanelModal = true"
-                >
-                  <EditIcon class="h-4 w-4" />
-                </Button>
-              </template>
-            </Section>
-          </div>
-        </div>
+        <SidePanelLayout
+          v-model="lead.data"
+          :sections="sections.data"
+          doctype="CRM Lead"
+          @update="updateField"
+          @reload="sections.reload"
+        />
       </div>
     </Resizer>
   </div>
-  <AssignmentModal
-    v-if="showAssignmentModal"
-    v-model="showAssignmentModal"
-    v-model:assignees="lead.data._assignedTo"
-    :doc="lead.data"
-    doctype="CRM Lead"
-  />
   <Dialog
     v-model="showConvertToDealModal"
     :options="{
-      title: __('Convert to Deal'),
       size: 'xl',
       actions: [
         {
@@ -214,12 +196,38 @@
       ],
     }"
   >
+    <template #body-header>
+      <div class="mb-6 flex items-center justify-between">
+        <div>
+          <h3 class="text-2xl font-semibold leading-6 text-ink-gray-9">
+            {{ __('Convert to Deal') }}
+          </h3>
+        </div>
+        <div class="flex items-center gap-1">
+          <Button
+            v-if="isManager() && !isMobileView"
+            variant="ghost"
+            class="w-7"
+            @click="openQuickEntryModal"
+          >
+            <EditIcon class="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            class="w-7"
+            @click="showConvertToDealModal = false"
+          >
+            <FeatherIcon name="x" class="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </template>
     <template #body-content>
-      <div class="mb-4 flex items-center gap-2 text-gray-600">
+      <div class="mb-4 flex items-center gap-2 text-ink-gray-5">
         <OrganizationsIcon class="h-4 w-4" />
         <label class="block text-base">{{ __('Organization') }}</label>
       </div>
-      <div class="ml-6">
+      <div class="ml-6 text-ink-gray-9">
         <div class="flex items-center justify-between text-base">
           <div>{{ __('Choose Existing') }}</div>
           <Switch v-model="existingOrganizationChecked" />
@@ -227,7 +235,6 @@
         <Link
           v-if="existingOrganizationChecked"
           class="form-control mt-2.5"
-          variant="outline"
           size="md"
           :value="existingOrganization"
           doctype="CRM Organization"
@@ -242,11 +249,11 @@
         </div>
       </div>
 
-      <div class="mb-4 mt-6 flex items-center gap-2 text-gray-600">
+      <div class="mb-4 mt-6 flex items-center gap-2 text-ink-gray-5">
         <ContactsIcon class="h-4 w-4" />
         <label class="block text-base">{{ __('Contact') }}</label>
       </div>
-      <div class="ml-6">
+      <div class="ml-6 text-ink-gray-9">
         <div class="flex items-center justify-between text-base">
           <div>{{ __('Choose Existing') }}</div>
           <Switch v-model="existingContactChecked" />
@@ -254,7 +261,6 @@
         <Link
           v-if="existingContactChecked"
           class="form-control mt-2.5"
-          variant="outline"
           size="md"
           :value="existingContact"
           doctype="Contact"
@@ -264,17 +270,44 @@
           {{ __("New contact will be created based on the person's details") }}
         </div>
       </div>
+
+      <div v-if="dealTabs.data?.length" class="h-px w-full border-t my-6" />
+
+      <FieldLayout
+        v-if="dealTabs.data?.length"
+        :tabs="dealTabs.data"
+        :data="deal"
+        doctype="CRM Deal"
+      />
     </template>
   </Dialog>
-  <SidePanelModal v-if="showSidePanelModal" v-model="showSidePanelModal" />
+  <QuickEntryModal
+    v-if="showQuickEntryModal"
+    v-model="showQuickEntryModal"
+    doctype="CRM Deal"
+    :onlyRequired="true"
+  />
+  <FilesUploader
+    v-if="lead.data?.name"
+    v-model="showFilesUploader"
+    doctype="CRM Lead"
+    :docname="lead.data.name"
+    @after="
+      () => {
+        activities?.all_activities?.reload()
+        changeTabTo('attachments')
+      }
+    "
+  />
 </template>
 <script setup>
+import Icon from '@/components/Icon.vue'
 import Resizer from '@/components/Resizer.vue'
-import EditIcon from '@/components/Icons/EditIcon.vue'
 import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
 import EmailIcon from '@/components/Icons/EmailIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CommentIcon from '@/components/Icons/CommentIcon.vue'
+import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import NoteIcon from '@/components/Icons/NoteIcon.vue'
@@ -284,30 +317,38 @@ import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import OrganizationsIcon from '@/components/Icons/OrganizationsIcon.vue'
 import ContactsIcon from '@/components/Icons/ContactsIcon.vue'
+import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
+import EditIcon from '@/components/Icons/EditIcon.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Activities from '@/components/Activities/Activities.vue'
-import AssignmentModal from '@/components/Modals/AssignmentModal.vue'
-import SidePanelModal from '@/components/Settings/SidePanelModal.vue'
-import MultipleAvatar from '@/components/MultipleAvatar.vue'
+import AssignTo from '@/components/AssignTo.vue'
+import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import Link from '@/components/Controls/Link.vue'
-import Section from '@/components/Section.vue'
-import SectionFields from '@/components/SectionFields.vue'
+import SidePanelLayout from '@/components/SidePanelLayout.vue'
+import FieldLayout from '@/components/FieldLayout/FieldLayout.vue'
+import QuickEntryModal from '@/components/Modals/QuickEntryModal.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import {
   openWebsite,
   createToast,
   setupAssignees,
-  setupCustomActions,
+  setupCustomizations,
   errorMessage,
   copyToClipboard,
 } from '@/utils'
+import { getView } from '@/utils/view'
+import { getSettings } from '@/stores/settings'
+import { usersStore } from '@/stores/users'
 import { globalStore } from '@/stores/global'
 import { contactsStore } from '@/stores/contacts'
-import { organizationsStore } from '@/stores/organizations'
 import { statusesStore } from '@/stores/statuses'
-import { usersStore } from '@/stores/users'
-import { whatsappEnabled, callEnabled } from '@/composables/settings'
+import {
+  whatsappEnabled,
+  callEnabled,
+  isMobileView,
+} from '@/composables/settings'
+import { capture } from '@/telemetry'
 import {
   createResource,
   FileUploader,
@@ -318,15 +359,17 @@ import {
   Switch,
   Breadcrumbs,
   call,
+  usePageMeta,
 } from 'frappe-ui'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useActiveTabManager } from '@/composables/useActiveTabManager'
 
-const { $dialog, makeCall } = globalStore()
-const { getContactByName, contacts } = contactsStore()
-const { organizations } = organizationsStore()
-const { statusOptions, getLeadStatus } = statusesStore()
+const { brand } = getSettings()
 const { isManager } = usersStore()
+const { $dialog, $socket, makeCall } = globalStore()
+const { getContactByName, contacts } = contactsStore()
+const { statusOptions, getLeadStatus, getDealStatus } = statusesStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -342,14 +385,16 @@ const lead = createResource({
   params: { name: props.leadId },
   cache: ['lead', props.leadId],
   onSuccess: (data) => {
-    setupAssignees(data)
-    setupCustomActions(data, {
+    setupAssignees(lead)
+    setupCustomizations(lead, {
       doc: data,
       $dialog,
+      $socket,
       router,
       updateField,
       createToast,
       deleteDoc: deleteLead,
+      resource: { lead, sections },
       call,
     })
   },
@@ -361,8 +406,7 @@ onMounted(() => {
 })
 
 const reload = ref(false)
-const showAssignmentModal = ref(false)
-const showSidePanelModal = ref(false)
+const showFilesUploader = ref(false)
 
 function updateLead(fieldname, value, callback) {
   value = Array.isArray(fieldname) ? '' : value
@@ -384,7 +428,7 @@ function updateLead(fieldname, value, callback) {
       createToast({
         title: __('Lead updated'),
         icon: 'check',
-        iconClasses: 'text-green-600',
+        iconClasses: 'text-ink-green-3',
       })
       callback?.()
     },
@@ -393,7 +437,7 @@ function updateLead(fieldname, value, callback) {
         title: __('Error updating lead'),
         text: __(err.messages?.[0]),
         icon: 'x',
-        iconClasses: 'text-red-600',
+        iconClasses: 'text-ink-red-4',
       })
     },
   })
@@ -406,7 +450,7 @@ function validateRequired(fieldname, value) {
       title: __('Error Updating Lead'),
       text: __('{0} is a required field', [meta[fieldname].label]),
       icon: 'x',
-      iconClasses: 'text-red-600',
+      iconClasses: 'text-ink-red-4',
     })
     return true
   }
@@ -415,6 +459,22 @@ function validateRequired(fieldname, value) {
 
 const breadcrumbs = computed(() => {
   let items = [{ label: __('Leads'), route: { name: 'Leads' } }]
+
+  if (route.query.view || route.query.viewType) {
+    let view = getView(route.query.view, route.query.viewType, 'CRM Lead')
+    if (view) {
+      items.push({
+        label: __(view.label),
+        icon: view.icon,
+        route: {
+          name: 'Leads',
+          params: { viewType: route.query.viewType },
+          query: { view: route.query.view },
+        },
+      })
+    }
+  }
+
   items.push({
     label: lead.data.lead_name || __('Untitled'),
     route: { name: 'Lead', params: { leadId: lead.data.name } },
@@ -422,7 +482,12 @@ const breadcrumbs = computed(() => {
   return items
 })
 
-const tabIndex = ref(0)
+usePageMeta(() => {
+  return {
+    title: lead.data?.lead_name || lead.data?.name,
+    icon: brand.favicon,
+  }
+})
 
 const tabs = computed(() => {
   let tabOptions = [
@@ -442,6 +507,11 @@ const tabs = computed(() => {
       icon: CommentIcon,
     },
     {
+      name: 'Data',
+      label: __('Data'),
+      icon: DetailsIcon,
+    },
+    {
       name: 'Calls',
       label: __('Calls'),
       icon: PhoneIcon,
@@ -458,6 +528,11 @@ const tabs = computed(() => {
       icon: NoteIcon,
     },
     {
+      name: 'Attachments',
+      label: __('Attachments'),
+      icon: AttachmentIcon,
+    },
+    {
       name: 'WhatsApp',
       label: __('WhatsApp'),
       icon: WhatsAppIcon,
@@ -466,6 +541,8 @@ const tabs = computed(() => {
   ]
   return tabOptions.filter((tab) => (tab.condition ? tab.condition() : true))
 })
+
+const { tabIndex, changeTabTo } = useActiveTabManager(tabs, 'lastLeadTab')
 
 watch(tabs, (value) => {
   if (value && route.params.tabName) {
@@ -485,10 +562,10 @@ function validateFile(file) {
   }
 }
 
-const fieldsLayout = createResource({
-  url: 'crm.api.doc.get_sidebar_fields',
-  cache: ['fieldsLayout', props.leadId],
-  params: { doctype: 'CRM Lead', name: props.leadId },
+const sections = createResource({
+  url: 'crm.fcrm.doctype.crm_fields_layout.crm_fields_layout.get_sidepanel_sections',
+  cache: ['sidePanelSections', 'CRM Lead'],
+  params: { doctype: 'CRM Lead' },
   auto: true,
 })
 
@@ -523,7 +600,7 @@ async function convertToDeal(updated) {
       title: __('Error'),
       text: __('Please select an existing contact'),
       icon: 'x',
-      iconClasses: 'text-red-600',
+      iconClasses: 'text-ink-red-4',
     })
     return
   }
@@ -533,7 +610,7 @@ async function convertToDeal(updated) {
       title: __('Error'),
       text: __('Please select an existing organization'),
       icon: 'x',
-      iconClasses: 'text-red-600',
+      iconClasses: 'text-ink-red-4',
     })
     return
   }
@@ -569,18 +646,23 @@ async function convertToDeal(updated) {
     )
     showConvertToDealModal.value = false
   } else {
-    let deal = await call(
+    let _deal = await call(
       'crm.fcrm.doctype.crm_lead.crm_lead.convert_to_deal',
-      {
-        lead: lead.data.name,
-      },
-    )
-    if (deal) {
+      { lead: lead.data.name, deal },
+    ).catch((err) => {
+      createToast({
+        title: __('Error converting to deal'),
+        text: __(err.messages?.[0]),
+        icon: 'x',
+        iconClasses: 'text-ink-red-4',
+      })
+    })
+    if (_deal) {
+      capture('convert_lead_to_deal')
       if (updated) {
-        await organizations.reload()
         await contacts.reload()
       }
-      router.push({ name: 'Deal', params: { dealId: deal } })
+      router.push({ name: 'Deal', params: { dealId: _deal } })
     }
   }
 }
@@ -589,5 +671,51 @@ const activities = ref(null)
 
 function openEmailBox() {
   activities.value.emailBox.show = true
+}
+
+const deal = reactive({})
+
+const dealStatuses = computed(() => {
+  let statuses = statusOptions('deal')
+  if (!deal.status) {
+    deal.status = statuses[0].value
+  }
+  return statuses
+})
+
+const dealTabs = createResource({
+  url: 'crm.fcrm.doctype.crm_fields_layout.crm_fields_layout.get_fields_layout',
+  cache: ['RequiredFields', 'CRM Deal'],
+  params: { doctype: 'CRM Deal', type: 'Required Fields' },
+  auto: true,
+  transform: (_tabs) => {
+    let hasFields = false
+    let parsedTabs = _tabs.forEach((tab) => {
+      tab.sections.forEach((section) => {
+        section.columns.forEach((column) => {
+          column.fields.forEach((field) => {
+            hasFields = true
+            if (field.fieldname == 'status') {
+              field.fieldtype = 'Select'
+              field.options = dealStatuses.value
+              field.prefix = getDealStatus(deal.status).color
+            }
+
+            if (field.fieldtype === 'Table') {
+              deal[field.fieldname] = []
+            }
+          })
+        })
+      })
+    })
+    return hasFields ? parsedTabs : []
+  },
+})
+
+const showQuickEntryModal = ref(false)
+
+function openQuickEntryModal() {
+  showQuickEntryModal.value = true
+  showConvertToDealModal.value = false
 }
 </script>
